@@ -2,40 +2,42 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import re
+import os
 
-# Fonction pour extraire tous les noms de Pokémon depuis la page nationale
-def extract_all_pokemon_names(url):
+# Fonction pour extraire tous les noms de Pokémon et leurs liens exacts depuis la page nationale
+def extract_all_pokemon_names_and_links(url):
     response = requests.get(url)
     soup = BeautifulSoup(response.text, "html.parser")
-    names = [a.text.strip() for a in soup.find_all("a", class_="ent-name")]
-    return names
+    names = []
+    links = []
+    for a in soup.find_all("a", class_="ent-name"):
+        names.append(a.text.strip())
+        href = a.get("href", "")
+        if href.startswith("/pokedex/"):
+            links.append("https://pokemondb.net" + href)
+        else:
+            links.append("")
+    return names, links
 
-# Fonction pour générer le lien Pokédex pour chaque Pokémon
-def get_pokedex_url(name):
-    base_url = "https://pokemondb.net/pokedex/"
-    # Cas particuliers pour certains noms
-    if name.lower() == "farfetch'd":
-        return base_url + "farfetchd"
-    if name.lower() in ["nidoran♀", "nidoran", "nidoran-f"]:
-        return base_url + "nidoran-f"
-    if name.lower() in ["nidoran♂", "nidoran", "nidoran-m"]:
-        return base_url + "nidoran-m"
-    # Nettoyer le nom : minuscules, espaces et caractères spéciaux remplacés par '-'
-    name_clean = name.lower()
-    name_clean = name_clean.replace(" ", "-")
-    return f"{base_url}{name_clean}"
-
-
-# Extraire tous les noms de Pokémon et générer leurs liens
+# Extraire tous les noms de Pokémon et leurs liens exacts
 national_url = "https://pokemondb.net/pokedex/national"
-all_names = extract_all_pokemon_names(national_url)
-links = [get_pokedex_url(name) for name in all_names]
+all_names, links = extract_all_pokemon_names_and_links(national_url)
 df_names = pd.DataFrame({"Nom": all_names, "Lien": links})
-df_names.to_csv("pokemon_names.csv", index=False, encoding="utf-8")
+
+# Créer le dossier csv s'il n'existe pas
+os.makedirs("csv", exist_ok=True)
+
+csv_names_path = os.path.join("csv", "pokemon_names.csv")
+df_names.to_csv(csv_names_path, index=False, encoding="utf-8")
+print("Le fichier pokemon_names.csv a été généré avec", len(df_names), "Pokémon.")
+ok = input("La génération du CSV est-elle correcte ? (o/n) ")
+if ok.strip().lower() != 'o':
+    print("Arrêt du script. Vérifiez le CSV.")
+    exit(0)
 
 
 # --- Demander à l'utilisateur combien de Pokémon scraper ---
-df_names = pd.read_csv("pokemon_names.csv")
+df_names = pd.read_csv(csv_names_path)
 try:
     n = int(input("Combien de Pokémon voulez-vous scraper ? "))
     if n < 1 or n > len(df_names):
@@ -47,21 +49,12 @@ except Exception:
 selected_pokemon = df_names.head(n)
 
 
-# Fonction pour générer le lien de l'image à partir du nom du Pokémon
-def get_pokemon_image_url(name):
-    base_url = "https://img.pokemondb.net/artwork/large/"
-    # Cas particuliers pour certains noms
-    if name.lower() == "farfetch'd":
-        return base_url + "farfetchd.avif"
-    if name.lower() in ["nidoran♀", "nidoran\u001e", "nidoran-f"]:
-        return base_url + "nidoran-f.jpg"
-    if name.lower() in ["nidoran♂", "nidoran\u001a", "nidoran-m"]:
-        return base_url + "nidoran-m.jpg"
-    # Nettoyer le nom : minuscules, espaces et caractères spéciaux remplacés par '-'
-    name_clean = name.lower()
-    name_clean = re.sub(r"[^a-z0-9]+", "-", name_clean)
-    name_clean = name_clean.strip('-')
-    return f"{base_url}{name_clean}.jpg"
+# Fonction pour récupérer dynamiquement le lien de l'image officielle depuis la page du Pokémon
+def get_pokemon_image_url(soup):
+    a_img = soup.find("a", rel="lightbox")
+    if a_img and a_img.has_attr("href"):
+        return a_img["href"]
+    return ""
 
 # Fonction générique pour extraire les infos d'un tableau à partir du titre h2
 def extract_table_data(soup, h2_title):
@@ -102,7 +95,7 @@ for _, row in selected_pokemon.iterrows():
                 data[f"{section} - {k}"] = v
             else:
                 data[k] = v
-    image_url = get_pokemon_image_url(name)
+    image_url = get_pokemon_image_url(soup)
     data_with_name = {"Nom": name}
     data_with_name.update(data)
     data_with_name["Image"] = image_url
@@ -110,5 +103,36 @@ for _, row in selected_pokemon.iterrows():
 
 # Convertir en DataFrame et sauvegarder
 df = pd.DataFrame(all_pokemon_data)
-df.to_csv("pokedex_data.csv", index=False, encoding="utf-8")
+csv_data_path = os.path.join("csv", "pokedex_data.csv")
+df.to_csv(csv_data_path, index=False, encoding="utf-8")
 print(df)
+
+
+# --- Vérification des liens des CSV pour erreurs 404 ---
+def check_links_for_404(csv_path, column):
+    import requests
+    df = pd.read_csv(csv_path)
+    errors = []
+    for i, url in enumerate(df[column]):
+        if not isinstance(url, str) or not url.startswith("http"):
+            errors.append((i, url, "URL invalide"))
+            continue
+        try:
+            resp = requests.head(url, allow_redirects=True, timeout=5)
+            if resp.status_code == 404:
+                errors.append((i, url, "404"))
+        except Exception as e:
+            errors.append((i, url, str(e)))
+    if errors:
+        print(f"Erreurs détectées dans {csv_path} (colonne {column}):")
+        for idx, url, err in errors:
+            print(f"  Ligne {idx+1}: {url} -> {err}")
+    else:
+        print(f"Aucune erreur 404 détectée dans {csv_path} (colonne {column})")
+
+do_check = input("Voulez-vous vérifier les liens des CSV ? (o/n) ")
+if do_check.strip().lower() == 'o':
+    print("\nVérification des liens du CSV des noms :")
+    check_links_for_404(csv_names_path, "Lien")
+    print("\nVérification des liens du CSV des images :")
+    check_links_for_404(csv_data_path, "Image")
