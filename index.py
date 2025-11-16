@@ -13,20 +13,50 @@ def extract_all_pokemon_names(url):
 # Fonction pour générer le lien Pokédex pour chaque Pokémon
 def get_pokedex_url(name):
     base_url = "https://pokemondb.net/pokedex/"
+    # Cas particuliers pour certains noms
+    if name.lower() == "farfetch'd":
+        return base_url + "farfetchd"
+    if name.lower() in ["nidoran♀", "nidoran", "nidoran-f"]:
+        return base_url + "nidoran-f"
+    if name.lower() in ["nidoran♂", "nidoran", "nidoran-m"]:
+        return base_url + "nidoran-m"
     # Nettoyer le nom : minuscules, espaces et caractères spéciaux remplacés par '-'
     name_clean = name.lower()
     name_clean = name_clean.replace(" ", "-")
     return f"{base_url}{name_clean}"
 
 
-# --- Charger les 10 premiers Pokémon depuis le CSV ---
+# Extraire tous les noms de Pokémon et générer leurs liens
+national_url = "https://pokemondb.net/pokedex/national"
+all_names = extract_all_pokemon_names(national_url)
+links = [get_pokedex_url(name) for name in all_names]
+df_names = pd.DataFrame({"Nom": all_names, "Lien": links})
+df_names.to_csv("pokemon_names.csv", index=False, encoding="utf-8")
+
+
+# --- Demander à l'utilisateur combien de Pokémon scraper ---
 df_names = pd.read_csv("pokemon_names.csv")
-first_10 = df_names.head(10)
+try:
+    n = int(input("Combien de Pokémon voulez-vous scraper ? "))
+    if n < 1 or n > len(df_names):
+        print(f"Nombre invalide, on prendra {min(10, len(df_names))} par défaut.")
+        n = min(10, len(df_names))
+except Exception:
+    print(f"Entrée invalide, on prendra 10 par défaut.")
+    n = 10
+selected_pokemon = df_names.head(n)
 
 
 # Fonction pour générer le lien de l'image à partir du nom du Pokémon
 def get_pokemon_image_url(name):
     base_url = "https://img.pokemondb.net/artwork/large/"
+    # Cas particuliers pour certains noms
+    if name.lower() == "farfetch'd":
+        return base_url + "farfetchd.avif"
+    if name.lower() in ["nidoran♀", "nidoran\u001e", "nidoran-f"]:
+        return base_url + "nidoran-f.jpg"
+    if name.lower() in ["nidoran♂", "nidoran\u001a", "nidoran-m"]:
+        return base_url + "nidoran-m.jpg"
     # Nettoyer le nom : minuscules, espaces et caractères spéciaux remplacés par '-'
     name_clean = name.lower()
     name_clean = re.sub(r"[^a-z0-9]+", "-", name_clean)
@@ -56,9 +86,9 @@ def extract_table_data(soup, h2_title):
 
 
 
-# --- Scraping des infos pour les 10 premiers Pokémon ---
+# --- Scraping des infos pour le nombre choisi de Pokémon ---
 all_pokemon_data = []
-for _, row in first_10.iterrows():
+for _, row in selected_pokemon.iterrows():
     name = row["Nom"]
     url = row["Lien"]
     response = requests.get(url)
