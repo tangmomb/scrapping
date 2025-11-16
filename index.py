@@ -1,3 +1,4 @@
+import shutil
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -136,3 +137,33 @@ if do_check.strip().lower() == 'o':
     check_links_for_404(csv_names_path, "Lien")
     print("\nVérification des liens du CSV des images :")
     check_links_for_404(csv_data_path, "Image")
+
+
+
+# --- Téléchargement des 5 premières images du CSV pokedex_data.csv ---
+def download_images_from_csv(csv_path, column, dest_folder, n=5):
+    df = pd.read_csv(csv_path)
+    os.makedirs(dest_folder, exist_ok=True)
+    for i, url in enumerate(df[column].head(n)):
+        if not isinstance(url, str) or not url.startswith("http"):
+            print(f"Image {i+1}: URL invalide, ignorée.")
+            continue
+        try:
+            response = requests.get(url, stream=True, timeout=10)
+            if response.status_code == 200:
+                ext = os.path.splitext(url)[1]
+                if not ext or len(ext) > 5:
+                    ext = ".jpg"
+                filename = f"{i+1}{ext}"
+                path = os.path.join(dest_folder, filename)
+                with open(path, 'wb') as f:
+                    shutil.copyfileobj(response.raw, f)
+                print(f"Image {i+1} téléchargée : {filename}")
+            else:
+                print(f"Image {i+1}: Erreur HTTP {response.status_code}")
+        except Exception as e:
+            print(f"Image {i+1}: Erreur {e}")
+
+do_dl = input("Voulez-vous télécharger les 5 premières images ? (o/n) ")
+if do_dl.strip().lower() == 'o':
+    download_images_from_csv(os.path.join("csv", "pokedex_data.csv"), "Image", "images", n=5)
